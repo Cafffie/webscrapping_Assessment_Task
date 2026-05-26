@@ -1,0 +1,16 @@
+undetected-chromedriver
+selenium
+webdriver-manager
+pandas
+beautifulsoup4
+lxml
+schedule
+openpyxl
+requests
+pymongo
+python-dotenv
+setuptools
+pandas
+python-dateutil
+pg8000
+cloud-sql-python-connector
