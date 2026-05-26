@@ -1,22 +1,16 @@
 import re
 import os
 import time
-import random
 import logging
-import traceback
 import pandas as pd
 
 from datetime import datetime
-from urllib.parse import urljoin
 from dateutil import parser
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    TimeoutException,
-    NoSuchElementException,
-)
+from selenium.common.exceptions import TimeoutException
 
 import undetected_chromedriver as uc
 
@@ -25,16 +19,16 @@ import undetected_chromedriver as uc
 # CONFIG
 # ------------------------------------------------------------
 RUN_HEADLESS = True
-BASE_URL = "https://watfordpalacetheatre.co.uk/"
-OUTPUT_FILE = "output.csv"
+OUTPUT_FILE = "output1.csv"
 
 PAGES = [
     ("https://watfordpalacetheatre.co.uk/whats-on/?category=musical", "Musical"),
-    ("https://watfordpalacetheatre.co.uk/whats-on/?category=music", "Music"),
+    ("https://watfordpalacetheatre.co.uk/whats-on/?category=music", "Musical"),
     ("https://watfordpalacetheatre.co.uk/whats-on/?category=drama", "Play"),
 ]
 
-os.makedirs("log", exist_ok=True)
+if not os.path.exists("log"):
+    os.makedirs("log")
 
 logging.basicConfig(
     filename="log/scrape.log",
@@ -48,7 +42,7 @@ logging.basicConfig(
 # ------------------------------------------------------------
 def scrape_shows():
 
-    def log_and_print(msg):
+    def log(msg):
         print(msg)
         logging.info(msg)
 
@@ -82,17 +76,17 @@ def scrape_shows():
     # --------------------------------------------------------
     # SCROLL
     # --------------------------------------------------------
-    def scroll_to_load_all_shows(driver):
-        last_height = driver.execute_script("return document.body.scrollHeight")
+    def scroll_to_load_all(driver):
+        last = driver.execute_script("return document.body.scrollHeight")
 
         while True:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
+            new = driver.execute_script("return document.body.scrollHeight")
+            if new == last:
                 break
-            last_height = new_height
+            last = new
 
     # --------------------------------------------------------
     # DATE PARSER
@@ -105,18 +99,17 @@ def scrape_shows():
                 d = parser.parse(parts[0]).strftime("%Y-%m-%d")
                 return d, d
 
-            open_d = parser.parse(parts[0]).strftime("%Y-%m-%d")
-            close_d = parser.parse(parts[1]).strftime("%Y-%m-%d")
-
-            return open_d, close_d
-
+            return (
+                parser.parse(parts[0]).strftime("%Y-%m-%d"),
+                parser.parse(parts[1]).strftime("%Y-%m-%d"),
+            )
         except:
             return None, None
 
     # --------------------------------------------------------
     # LISTING PAGE
     # --------------------------------------------------------
-    def extract_events_from_page(driver, category):
+    def extract_events(driver, category):
         events = []
 
         cards = driver.find_elements(By.CSS_SELECTOR, "div.gridblock.postitem")
@@ -142,70 +135,79 @@ def scrape_shows():
 
         return events
 
-    # --------------------------------------------------------
-    # DETAIL PAGE + SEATS
-    # --------------------------------------------------------
-    def extract_event_datetime_venue(driver):
+    # ------------------------------------------------------------
+    # DETAIL PAGE SCRAPER (FIXED)
+    # ------------------------------------------------------------
+    def extract_event_details(driver):
 
         data = {
             "upcoming_performances": [],
             "seat_pricing": {}
         }
 
+        # -------------------------
+        # PERFORMANCE EXTRACTION
+        # -------------------------
         try:
-            # ---------------------------
-            # PERFORMANCE DATA
-            # ---------------------------
             blocks = driver.find_elements(By.CSS_SELECTOR, "div.spektrix_booking--event")
 
             performances = []
 
             for b in blocks:
                 try:
-                    d = parser.parse(
+                    date = parser.parse(
                         b.find_element(By.CSS_SELECTOR, ".spektrix_booking--date").text,
                         fuzzy=True
                     ).strftime("%Y-%m-%d")
 
-                    t = parser.parse(
+                    time_ = parser.parse(
                         b.find_element(By.CSS_SELECTOR, ".spektrix_booking--time").text,
                         fuzzy=True
                     ).strftime("%H:%M")
 
-                    performances.append({"date": d, "time": t})
+                    performances.append(f"{date} {time_}")
 
                 except:
                     continue
 
             data["upcoming_performances"] = performances
 
-            # ---------------------------
-            # CLICK BOOK BUTTON
-            # ---------------------------
-            try:
-                btn = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.button"))
-                )
-                driver.execute_script("arguments[0].click();", btn)
-                time.sleep(3)
-            except:
-                return data
+        except:
+            pass
 
-            # ---------------------------
-            # SWITCH TO IFRAME
-            # ---------------------------
-            try:
-                iframe = driver.find_element(By.ID, "SpektrixIFrame")
-                driver.switch_to.frame(iframe)
-            except:
-                return data
+        # fallback key if no performance found
+        perf_key = performances[0] if performances else "unknown"
 
-            # ---------------------------
-            # SEAT SCRAPING
-            # ---------------------------
-            seat_pricing = {}
+        # -------------------------
+        # CLICK BOOK BUTTON
+        # -------------------------
+        try:
+            btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "a.button"))
+            )
+            driver.execute_script("arguments[0].click();", btn)
+            time.sleep(3)
+        except:
+            return data
 
-            seats = driver.find_elements(By.CSS_SELECTOR, "img.SeatSelectable, img.Seat")
+        # -------------------------
+        # SWITCH IFRAME
+        # -------------------------
+        try:
+            iframe = driver.find_element(By.ID, "SpektrixIFrame")
+            driver.switch_to.frame(iframe)
+        except:
+            return data
+
+        # -------------------------
+        # SEAT PRICING (FIXED FORMAT)
+        # -------------------------
+        seat_pricing = {}
+
+        try:
+            seats = driver.find_elements(By.CSS_SELECTOR, "img.SeatSelectable")
+
+            seat_list = []
 
             for seat in seats:
                 tooltip = seat.get_attribute("tooltip") or seat.get_attribute("title")
@@ -213,19 +215,27 @@ def scrape_shows():
                 if tooltip and "£" in tooltip:
                     try:
                         code, price = tooltip.split(" - ")
-                        seat_pricing[code.strip()] = price.strip()
+                        price_val = float(re.sub(r"[^\d.]", "", price))
+
+                        seat_list.append({
+                            "seat": code.strip(),
+                            "ticket_price": price_val
+                        })
+
                     except:
                         continue
 
-            data["seat_pricing"] = seat_pricing
-
-            return data
+            seat_pricing[perf_key] = seat_list
 
         except:
-            return data
+            pass
+
+        data["seat_pricing"] = seat_pricing
+
+        return data
 
     # --------------------------------------------------------
-    # RUN
+    # RUN DRIVER
     # --------------------------------------------------------
     driver = setup_browser()
     all_rows = []
@@ -233,40 +243,34 @@ def scrape_shows():
     try:
         for url, category in PAGES:
 
-            print(f"\n--- CATEGORY: {category} ---")
+            log(f"Scraping category: {category}")
 
             safe_get(driver, url)
-            scroll_to_load_all_shows(driver)
+            scroll_to_load_all(driver)
 
-            events = extract_events_from_page(driver, category)
+            events = extract_events(driver, category)
 
             for e in events:
 
                 safe_get(driver, e["venue_url"])
                 time.sleep(2)
 
-                details = extract_event_datetime_venue(driver)
-
-                perf = details.get("upcoming_performances", [])
-                seat_map = details.get("seat_pricing", {})
+                details = extract_event_details(driver)
 
                 row = {
                     "title": e["title"],
                     "venue_url": e["venue_url"],
-                    "category": e["category"],
+                    "category": category,
                     "venue": "Watford Palace Theatre",
                     "address": "20 Clarendon Road",
                     "city": "Watford",
                     "country": "UK",
                     "open_date": e["open_date"],
                     "close_date": e["close_date"],
-                    "booking_start_date": None,
-                    "booking_end_date": None,
-                    "upcoming_performances": str(perf),
-                    "capacity": None,
+                    "upcoming_performances": str(details["upcoming_performances"]),
+                    "seat_pricing": str(details["seat_pricing"]),
                     "currency": "GBP",
                     "is_limited_run": False,
-                    "seat_pricing": str(seat_map),
                     "scrape_datetime": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
 
@@ -279,11 +283,11 @@ def scrape_shows():
         df = pd.DataFrame(final)
         df.to_csv(OUTPUT_FILE, index=False)
 
-        print(f"\nSaved {len(df)} rows")
+        log(f"Saved {len(df)} rows to {OUTPUT_FILE}")
 
     finally:
         driver.quit()
-        print("Browser closed")
+        log("Browser closed")
 
 
 if __name__ == "__main__":
