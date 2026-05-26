@@ -23,7 +23,6 @@ OUTPUT_FILE = "output1.csv"
 
 PAGES = [
     ("https://watfordpalacetheatre.co.uk/whats-on/?category=musical", "Musical"),
-    ("https://watfordpalacetheatre.co.uk/whats-on/?category=music", "Musical"),
     ("https://watfordpalacetheatre.co.uk/whats-on/?category=drama", "Play"),
 ]
 
