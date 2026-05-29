@@ -361,9 +361,6 @@ def extract_event_details(
 
         "venue_capacity": None,
 
-        "booking_start_date": None,
-        "booking_end_date": None,
-
         "is_limited_run": False
     }
 
@@ -430,8 +427,6 @@ def extract_event_details(
 
         log(f"Found {len(blocks)} performances")
 
-        booking_dates = []
-
         for block in blocks:
 
             try:
@@ -446,14 +441,15 @@ def extract_event_details(
                     ".spektrix_booking--time"
                 ).text.strip()
 
-                parsed_datetime = parser.parse(
-                    f"{date_text} {time_text}",
+                parsed_date = parser.parse(
+                    date_text,
                     fuzzy=True
-                )
+                ).strftime("%Y-%m-%d")
 
-                parsed_date = parsed_datetime.strftime("%Y-%m-%d")
-
-                parsed_time = parsed_datetime.strftime("%H:%M")
+                parsed_time = parser.parse(
+                    time_text,
+                    fuzzy=True
+                ).strftime("%H:%M")
 
                 performances.append({
 
@@ -461,8 +457,6 @@ def extract_event_details(
                     "time": parsed_time
 
                 })
-
-                booking_dates.append(parsed_date)
 
             except Exception as e:
 
@@ -472,29 +466,6 @@ def extract_event_details(
                 )
 
         data["upcoming_performances"] = performances
-
-        # ----------------------------------------------------
-        # BOOKING START/END DATE
-        # ----------------------------------------------------
-        if booking_dates:
-
-            data["booking_start_date"] = min(
-                booking_dates
-            )
-
-            data["booking_end_date"] = max(
-                booking_dates
-            )
-
-            log(
-                f"Booking start date: "
-                f"{data['booking_start_date']}"
-            )
-
-            log(
-                f"Booking end date: "
-                f"{data['booking_end_date']}"
-            )
 
     except Exception as e:
 
@@ -810,13 +781,8 @@ def scrape_shows():
                         "open_date": e["open_date"],
                         "close_date": e["close_date"],
 
-                        "booking_start_date": details[
-                            "booking_start_date"
-                        ],
-
-                        "booking_end_date": details[
-                            "booking_end_date"
-                        ],
+                        "booking_start_date": None,
+                        "booking_end_date": None,
 
                         "upcoming_performances": str(
                             details[
@@ -964,3 +930,4 @@ def scrape_shows():
 if __name__ == "__main__":
 
     scrape_shows()
+
